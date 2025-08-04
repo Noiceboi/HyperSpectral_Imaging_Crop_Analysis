@@ -1,0 +1,40 @@
+============================================================
+BÁO CÁO ĐÁNH GIÁ MÔ HÌNH 3D-RESNET
+PHÂN LOẠI TÌNH TRẠNG DINH DƯỠNG N2 CÂY CÀ TÍM
+============================================================
+
+Overall Accuracy: 0.9139 (91.39%)
+
+CLASSIFICATION REPORT:
+----------------------------------------
+              precision    recall  f1-score   support
+
+      Low N2     0.9991    0.7801    0.8762      7500
+   Medium N2     0.9872    0.9748    0.9809      7500
+     High N2     0.8010    0.9867    0.8842      7500
+
+    accuracy                         0.9139     22500
+   macro avg     0.9291    0.9139    0.9138     22500
+weighted avg     0.9291    0.9139    0.9138     22500
+
+
+PER-CLASS DETAILED METRICS:
+----------------------------------------
+
+Low N2:
+  Precision: 0.9991
+  Recall: 0.7801
+  F1-Score: 0.8762
+  Support: 7500
+
+Medium N2:
+  Precision: 0.9872
+  Recall: 0.9748
+  F1-Score: 0.9809
+  Support: 7500
+
+High N2:
+  Precision: 0.8010
+  Recall: 0.9867
+  F1-Score: 0.8842
+  Support: 7500
