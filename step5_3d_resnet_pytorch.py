@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 # Cấu hình GPU
 print("=" * 60)
-print("🚀 BƯỚC 5: XÂY DỰNG VÀ HUẤN LUYỆN 3D-RESNET (PYTORCH)")
+print("🚀 BƯỚC 5: XÂY DỰNG VÀ HUẤN LUYỆN 3D-RESNET (PYTORCH) + CHANNEL ATTENTION")
 print("=" * 60)
 
 # Kiểm tra GPU
@@ -63,6 +63,22 @@ def load_processed_data():
         with open(os.path.join(DATA_DIR, 'metadata.pkl'), 'rb') as f:
             metadata = pickle.load(f)
         
+        # Extract discriminative bands information
+        discriminative_info = metadata.get('discriminative_bands', None)
+        if discriminative_info:
+            discriminative_indices = discriminative_info.get('indices', None)
+            discriminative_wavelengths = discriminative_info.get('wavelengths', None)
+            target_wavelengths = discriminative_info.get('target_wavelengths', None)
+            
+            print(f"🎯 Discriminative Bands Info:")
+            if target_wavelengths:
+                for i, (target, actual, idx) in enumerate(zip(target_wavelengths, discriminative_wavelengths, discriminative_indices)):
+                    print(f"   Band {i+1}: {target:.1f}nm → {actual:.1f}nm (Index {idx})")
+        else:
+            discriminative_indices = None
+            discriminative_wavelengths = None
+            print("⚠️ No discriminative bands information found")
+        
         print("✅ Tải dữ liệu thành công!")
         print(f"📊 Training set: {X_train.shape} | Labels: {y_train.shape}")
         print(f"📊 Validation set: {X_val.shape} | Labels: {y_val.shape}")
@@ -70,11 +86,11 @@ def load_processed_data():
         print(f"📊 Number of classes: {metadata['n_classes']}")
         print(f"📊 Class names: {metadata['class_names']}")
         
-        return X_train, y_train, X_val, y_val, metadata
+        return X_train, y_train, X_val, y_val, metadata, discriminative_indices
         
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {str(e)}")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
 def prepare_data_for_pytorch(X_train, y_train, X_val, y_val):
     """
@@ -115,6 +131,98 @@ def prepare_data_for_pytorch(X_train, y_train, X_val, y_val):
     
     return X_train_tensor, y_train_tensor, X_val_tensor, y_val_tensor
 
+class ChannelAttention3D(nn.Module):
+    """
+    Channel Attention Module dành riêng cho Hyperspectral data
+    Tập trung vào các bands phân biệt được xác định từ discriminative analysis
+    """
+    def __init__(self, in_channels, reduction=16, discriminative_bands=None):
+        super(ChannelAttention3D, self).__init__()
+        
+        self.in_channels = in_channels
+        self.discriminative_bands = discriminative_bands
+        
+        # Global Average Pooling và Max Pooling trên spatial dimensions
+        self.avg_pool = nn.AdaptiveAvgPool3d(1)
+        self.max_pool = nn.AdaptiveMaxPool3d(1)
+        
+        # Shared MLP
+        self.mlp = nn.Sequential(
+            nn.Conv3d(in_channels, in_channels // reduction, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(in_channels // reduction, in_channels, 1, bias=False)
+        )
+        
+        # Discriminative bands emphasis weights
+        if discriminative_bands is not None:
+            # Tạo learned weights cho discriminative bands
+            self.disc_weight = nn.Parameter(torch.ones(len(discriminative_bands)) * 2.0)
+            print(f"🎯 Channel Attention: Emphasizing {len(discriminative_bands)} discriminative bands")
+        else:
+            self.disc_weight = None
+            
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, x):
+        # x shape: (N, C, D, H, W) where D is spectral dimension (277 bands)
+        
+        # Global pooling
+        avg_out = self.mlp(self.avg_pool(x))
+        max_out = self.mlp(self.max_pool(x))
+        
+        # Combine average and max pooling
+        attention_weights = self.sigmoid(avg_out + max_out)
+        
+        # Apply discriminative bands emphasis if available
+        if self.disc_weight is not None and self.discriminative_bands is not None:
+            # Create a mask for discriminative bands
+            band_emphasis = torch.ones_like(attention_weights)
+            
+            # Emphasize discriminative bands (assuming spectral dimension is D)
+            for i, band_idx in enumerate(self.discriminative_bands):
+                if band_idx < attention_weights.shape[2]:  # Check bounds
+                    band_emphasis[:, :, band_idx, :, :] *= self.disc_weight[i]
+            
+            attention_weights = attention_weights * band_emphasis
+        
+        # Apply attention weights
+        return x * attention_weights
+
+class SpectralAttention3D(nn.Module):
+    """
+    Spectral Attention Module - tập trung vào dimension phổ
+    Đặc biệt hữu ích cho hyperspectral data
+    """
+    def __init__(self, spectral_size, reduction=8):
+        super(SpectralAttention3D, self).__init__()
+        
+        # Spectral-wise attention
+        self.spectral_fc = nn.Sequential(
+            nn.Linear(spectral_size, spectral_size // reduction),
+            nn.ReLU(inplace=True),
+            nn.Linear(spectral_size // reduction, spectral_size),
+            nn.Sigmoid()
+        )
+        
+    def forward(self, x):
+        # x shape: (N, C, D, H, W)
+        N, C, D, H, W = x.size()
+        
+        # Global average pooling over spatial dimensions
+        spectral_features = x.mean(dim=[3, 4])  # (N, C, D)
+        
+        # Apply attention to each channel's spectral signature
+        attended_features = []
+        for c in range(C):
+            channel_spectral = spectral_features[:, c, :]  # (N, D)
+            attention_weights = self.spectral_fc(channel_spectral)  # (N, D)
+            attended_features.append(attention_weights.unsqueeze(1))  # (N, 1, D)
+        
+        spectral_attention = torch.cat(attended_features, dim=1)  # (N, C, D)
+        spectral_attention = spectral_attention.unsqueeze(-1).unsqueeze(-1)  # (N, C, D, 1, 1)
+        
+        return x * spectral_attention
+
 class ResidualBlock3D(nn.Module):
     """
     5.3. Khối Residual 3D cho PyTorch
@@ -148,6 +256,116 @@ class ResidualBlock3D(nn.Module):
         out = self.relu(out)
         
         return out
+
+class ResNet3D_Eggplant_WithAttention(nn.Module):
+    """
+    Enhanced 3D-ResNet với Channel và Spectral Attention
+    Tối ưu cho Hyperspectral Eggplant N2 Classification
+    """
+    def __init__(self, num_classes=3, input_channels=1, discriminative_bands=None):
+        super(ResNet3D_Eggplant_WithAttention, self).__init__()
+        
+        self.discriminative_bands = discriminative_bands
+        
+        # Giai đoạn 1: Trích xuất đặc trưng ban đầu
+        self.initial_conv = nn.Conv3d(input_channels, 32, kernel_size=(7, 3, 3), 
+                                     stride=(2, 1, 1), padding=(3, 1, 1))
+        self.initial_bn = nn.BatchNorm3d(32)
+        self.initial_relu = nn.ReLU(inplace=True)
+        self.initial_pool = nn.MaxPool3d(kernel_size=(2, 1, 1), stride=(2, 1, 1))
+        
+        # Channel Attention after initial conv
+        self.channel_attention1 = ChannelAttention3D(32, reduction=8, 
+                                                   discriminative_bands=discriminative_bands)
+        
+        # Spectral Attention - ước tính spectral size sau initial conv và pooling
+        # Initial: 277 -> conv stride 2 -> 139 -> pool stride 2 -> ~69
+        estimated_spectral_size = 69  # Sẽ được điều chỉnh runtime nếu cần
+        self.spectral_attention1 = SpectralAttention3D(estimated_spectral_size, reduction=8)
+        
+        # Giai đoạn 2: Các khối residual đầu tiên
+        self.res_block1_1 = ResidualBlock3D(32, 32)
+        self.res_block1_2 = ResidualBlock3D(32, 32)
+        
+        # Channel Attention after res blocks
+        self.channel_attention2 = ChannelAttention3D(32, reduction=8,
+                                                   discriminative_bands=discriminative_bands)
+        
+        # Giai đoạn 3: Giảm kích thước và tăng độ sâu
+        self.transition_conv = nn.Conv3d(32, 64, kernel_size=1, stride=(2, 1, 1))
+        self.transition_bn = nn.BatchNorm3d(64)
+        self.transition_relu = nn.ReLU(inplace=True)
+        self.transition_pool = nn.MaxPool3d(kernel_size=(2, 2, 2), stride=(2, 2, 2))
+        
+        # Channel Attention after transition
+        self.channel_attention3 = ChannelAttention3D(64, reduction=8,
+                                                   discriminative_bands=discriminative_bands)
+        
+        self.res_block2_1 = ResidualBlock3D(64, 64)
+        self.res_block2_2 = ResidualBlock3D(64, 64)
+        
+        # Final attention
+        self.channel_attention4 = ChannelAttention3D(64, reduction=8,
+                                                   discriminative_bands=discriminative_bands)
+        
+        # Giai đoạn 4: Phân loại
+        self.global_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
+        
+        # Enhanced classifier với discriminative features
+        self.classifier = nn.Sequential(
+            nn.Linear(64, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(128, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(64, num_classes)
+        )
+        
+        print(f"🎯 Enhanced ResNet3D with Attention Mechanisms:")
+        if discriminative_bands is not None:
+            print(f"   📊 Discriminative bands: {len(discriminative_bands)} bands")
+            print(f"   🎯 Target wavelengths: [691.5, 695.9, 693.7] nm")
+        
+    def forward(self, x):
+        # Giai đoạn 1: Initial feature extraction
+        x = self.initial_relu(self.initial_bn(self.initial_conv(x)))
+        x = self.initial_pool(x)
+        
+        # Apply channel attention
+        x = self.channel_attention1(x)
+        
+        # Apply spectral attention (with dynamic spectral size handling)
+        try:
+            if x.shape[2] != self.spectral_attention1.spectral_fc[0].in_features:
+                # Update spectral attention size if needed
+                actual_spectral_size = x.shape[2]
+                self.spectral_attention1 = SpectralAttention3D(actual_spectral_size, reduction=8).to(x.device)
+            x = self.spectral_attention1(x)
+        except:
+            # Skip spectral attention if size mismatch
+            pass
+        
+        # Giai đoạn 2: Residual blocks
+        x = self.res_block1_1(x)
+        x = self.res_block1_2(x)
+        x = self.channel_attention2(x)
+        
+        # Giai đoạn 3: Transition and more residuals
+        x = self.transition_relu(self.transition_bn(self.transition_conv(x)))
+        x = self.transition_pool(x)
+        x = self.channel_attention3(x)
+        
+        x = self.res_block2_1(x)
+        x = self.res_block2_2(x)
+        x = self.channel_attention4(x)
+        
+        # Giai đoạn 4: Classification
+        x = self.global_pool(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        x = self.classifier(x)
+        
+        return x
 
 class ResNet3D_Eggplant(nn.Module):
     """
@@ -204,7 +422,7 @@ class ResNet3D_Eggplant(nn.Module):
         
         return x
 
-def train_model_pytorch(model, train_loader, val_loader, num_epochs=100):
+def train_model_pytorch(model, train_loader, val_loader, model_name="best_3d_resnet_pytorch.pth", num_epochs=100):
     """
     5.5. Huấn luyện mô hình PyTorch
     """
@@ -317,8 +535,9 @@ def train_model_pytorch(model, train_loader, val_loader, num_epochs=100):
             # Lưu model tốt nhất
             if not os.path.exists('models'):
                 os.makedirs('models')
-            torch.save(model.state_dict(), 'models/best_3d_resnet_pytorch.pth')
-            print(f"   💾 Lưu model tốt nhất! Val Acc: {best_val_acc:.2f}%")
+            model_path = os.path.join('models', model_name)
+            torch.save(model.state_dict(), model_path)
+            print(f"   💾 Lưu model tốt nhất! Val Acc: {best_val_acc:.2f}% → {model_name}")
         else:
             patience_counter += 1
             
@@ -413,12 +632,12 @@ def visualize_training_results_pytorch(history):
 
 def main():
     """
-    Hàm chính thực hiện toàn bộ quy trình Bước 5 với PyTorch
+    Hàm chính thực hiện toàn bộ quy trình Bước 5 với PyTorch và Channel Attention
     """
     start_time = time.time()
     
     # Bước 5.1: Tải dữ liệu
-    X_train, y_train, X_val, y_val, metadata = load_processed_data()
+    X_train, y_train, X_val, y_val, metadata, discriminative_indices = load_processed_data()
     if X_train is None:
         return
     
@@ -438,13 +657,28 @@ def main():
     print(f"   🏋️ Train batches: {len(train_loader)}")
     print(f"   ✅ Val batches: {len(val_loader)}")
     
-    # Bước 5.3 & 5.4: Xây dựng mô hình
+    # Bước 5.3 & 5.4: Xây dựng mô hình với Attention
     NUM_CLASSES = metadata['n_classes']
-    model = ResNet3D_Eggplant(num_classes=NUM_CLASSES, input_channels=1)
+    
+    # Choose model architecture based on discriminative bands availability
+    if discriminative_indices is not None:
+        print(f"\n🎯 USING ENHANCED MODEL WITH CHANNEL ATTENTION")
+        model = ResNet3D_Eggplant_WithAttention(
+            num_classes=NUM_CLASSES, 
+            input_channels=1,
+            discriminative_bands=discriminative_indices
+        )
+        model_name = "best_3d_resnet_pytorch_attention.pth"
+    else:
+        print(f"\n📊 USING STANDARD MODEL (No discriminative bands found)")
+        model = ResNet3D_Eggplant(num_classes=NUM_CLASSES, input_channels=1)
+        model_name = "best_3d_resnet_pytorch.pth"
     
     print(f"\n📋 THÔNG TIN MÔ HÌNH:")
     print(f"📊 Input shape: (batch_size, 1, 277, 9, 9)")
     print(f"🎯 Output classes: {NUM_CLASSES}")
+    if discriminative_indices is not None:
+        print(f"🎯 Discriminative bands: {len(discriminative_indices)} bands")
     
     # Đếm số parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -453,7 +687,7 @@ def main():
     print(f"🏋️ Trainable parameters: {trainable_params:,}")
     
     # Bước 5.5: Huấn luyện
-    history = train_model_pytorch(model, train_loader, val_loader, num_epochs=100)
+    history = train_model_pytorch(model, train_loader, val_loader, model_name, num_epochs=100)
     
     # Bước 5.6: Trực quan hóa kết quả
     visualize_training_results_pytorch(history)

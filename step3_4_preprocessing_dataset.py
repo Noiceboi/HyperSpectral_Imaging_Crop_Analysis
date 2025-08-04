@@ -47,14 +47,47 @@ def load_data():
         
         gt_array = gt_array.astype(int)
         
+        # Extract wavelength information for discriminative bands
+        wavelengths = None
+        if hasattr(hsi_img, 'metadata') and 'wavelength' in hsi_img.metadata:
+            wavelengths = [float(w) for w in hsi_img.metadata['wavelength']]
+            print(f"🌊 Wavelength range: {min(wavelengths):.1f} - {max(wavelengths):.1f} nm")
+        
         print(f"✅ HSI Shape: {hsi_array.shape}")
         print(f"✅ GT Shape: {gt_array.shape}")
         
-        return hsi_array, gt_array, hsi_img
+        return hsi_array, gt_array, hsi_img, wavelengths
         
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {str(e)}")
-        return None, None, None
+        return None, None, None, None
+
+def get_discriminative_bands(wavelengths):
+    """
+    Xác định các bands phân biệt dựa trên phân tích từ bước 2
+    Từ advanced discrimination analysis: [691.497986, 695.872009, 693.684998]
+    """
+    if wavelengths is None:
+        return None, None
+    
+    # Discriminative wavelengths từ analysis
+    target_wavelengths = [691.497986, 695.872009, 693.684998]
+    wavelengths_array = np.array(wavelengths)
+    
+    # Tìm indices gần nhất cho các wavelengths quan trọng
+    discriminative_indices = []
+    discriminative_wavelengths = []
+    
+    for target_wl in target_wavelengths:
+        closest_idx = np.argmin(np.abs(wavelengths_array - target_wl))
+        discriminative_indices.append(closest_idx)
+        discriminative_wavelengths.append(wavelengths_array[closest_idx])
+    
+    print(f"\n🎯 DISCRIMINATIVE BANDS MAPPING:")
+    for i, (target, actual, idx) in enumerate(zip(target_wavelengths, discriminative_wavelengths, discriminative_indices)):
+        print(f"   Band {i+1}: Target {target:.1f}nm → Actual {actual:.1f}nm (Index {idx})")
+    
+    return discriminative_indices, discriminative_wavelengths
 
 def step3_preprocessing(hsi_array, apply_smoothing=False):
     """
@@ -275,7 +308,8 @@ def step4_train_val_test_split(patches, labels, test_size=0.15, val_size=0.15):
     return X_train, X_val, X_test, y_train, y_val, y_test
 
 def save_dataset(X_train, X_val, X_test, y_train, y_val, y_test, 
-                 global_min, global_max, save_dir="processed_data"):
+                 global_min, global_max, discriminative_indices=None, discriminative_wavelengths=None, 
+                 save_dir="processed_data"):
     """
     Lưu dataset đã xử lý
     """
@@ -310,7 +344,7 @@ def save_dataset(X_train, X_val, X_test, y_train, y_val, y_test,
         total_size += size_mb
         print(f"✅ Saved {filename:12} - {data.shape} - {size_mb:.1f} MB")
     
-    # Lưu metadata
+    # Lưu metadata với discriminative bands info
     metadata = {
         'patch_size': X_train.shape[1],  # Assuming square patches
         'n_bands': X_train.shape[3],
@@ -318,7 +352,12 @@ def save_dataset(X_train, X_val, X_test, y_train, y_val, y_test,
         'global_min': global_min,
         'global_max': global_max,
         'class_names': ['Low N2', 'Medium N2', 'High N2'],
-        'total_samples': len(X_train) + len(X_val) + len(X_test)
+        'total_samples': len(X_train) + len(X_val) + len(X_test),
+        'discriminative_bands': {
+            'indices': discriminative_indices,
+            'wavelengths': discriminative_wavelengths,
+            'target_wavelengths': [691.497986, 695.872009, 693.684998]
+        } if discriminative_indices is not None else None
     }
     
     metadata_path = os.path.join(save_dir, 'metadata.pkl')
@@ -336,9 +375,12 @@ def main():
     start_time = time.time()
     
     # Load data
-    hsi_array, gt_array, hsi_img = load_data()
+    hsi_array, gt_array, hsi_img, wavelengths = load_data()
     if hsi_array is None:
         return
+    
+    # Extract discriminative bands information
+    discriminative_indices, discriminative_wavelengths = get_discriminative_bands(wavelengths)
     
     # Bước 3.1: Preprocessing HSI
     hsi_normalized, global_min, global_max = step3_preprocessing(
@@ -361,7 +403,7 @@ def main():
     
     # Bước 4.3: Save dataset
     save_dataset(X_train, X_val, X_test, y_train, y_val, y_test,
-                 global_min, global_max)
+                 global_min, global_max, discriminative_indices, discriminative_wavelengths)
     
     # Summary
     elapsed_time = time.time() - start_time

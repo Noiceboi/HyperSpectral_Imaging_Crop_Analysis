@@ -1,0 +1,88 @@
+================================================================================
+DETAILED MODEL COMPARISON REPORT
+Standard ResNet vs Enhanced ResNet with Channel Attention
+================================================================================
+
+SUMMARY COMPARISON:
+--------------------------------------------------------------------------------
+Model                     Accuracy   F1-Score   Kappa      Precision  Recall    
+--------------------------------------------------------------------------------
+Standard_ResNet           0.9139     0.9138     0.8708     0.9291     0.9139    
+Attention_ResNet          0.9953     0.9953     0.9930     0.9953     0.9953    
+
+================================================================================
+
+DETAILED ANALYSIS: Standard_ResNet
+--------------------------------------------------
+Overall Accuracy: 0.9139
+Overall F1-Score: 0.9138
+Cohen's Kappa: 0.8708
+
+Per-Class Performance:
+  Low N2:
+    Precision: 0.9991
+    Recall:    0.7801
+    F1-Score:  0.8762
+  Medium N2:
+    Precision: 0.9872
+    Recall:    0.9748
+    F1-Score:  0.9809
+  High N2:
+    Precision: 0.8010
+    Recall:    0.9867
+    F1-Score:  0.8842
+
+Confusion Matrix:
+                  Low N2   Medium N2     High N2
+      Low N2        5851           0        1649
+   Medium N2           0        7311         189
+     High N2           5          95        7400
+
+==================================================
+
+DETAILED ANALYSIS: Attention_ResNet
+--------------------------------------------------
+Overall Accuracy: 0.9953
+Overall F1-Score: 0.9953
+Cohen's Kappa: 0.9930
+
+Per-Class Performance:
+  Low N2:
+    Precision: 0.9935
+    Recall:    0.9983
+    F1-Score:  0.9959
+  Medium N2:
+    Precision: 1.0000
+    Recall:    0.9943
+    F1-Score:  0.9971
+  High N2:
+    Precision: 0.9925
+    Recall:    0.9935
+    F1-Score:  0.9930
+
+Confusion Matrix:
+                  Low N2   Medium N2     High N2
+      Low N2        7487           0          13
+   Medium N2           0        7457          43
+     High N2          49           0        7451
+
+==================================================
+
+PERFORMANCE IMPROVEMENT ANALYSIS:
+--------------------------------------------------
+Accuracy Improvement: +0.0815 (+8.15%)
+F1-Score Improvement: +0.0816 (+8.16%)
+
+Per-Class Improvements:
+  Low N2:
+    Precision: -0.0056
+    Recall:    +0.2181
+    F1-Score:  +0.1197
+  Medium N2:
+    Precision: +0.0128
+    Recall:    +0.0195
+    F1-Score:  +0.0162
+  High N2:
+    Precision: +0.1915
+    Recall:    +0.0068
+    F1-Score:  +0.1088
