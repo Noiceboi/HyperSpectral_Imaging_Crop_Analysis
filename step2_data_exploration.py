@@ -5,6 +5,7 @@ Mục tiêu: Hiểu rõ cấu trúc và đặc điểm của dữ liệu trướ
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import spectral.io.envi as envi
 import os
 
@@ -117,6 +118,113 @@ def analyze_data_structure(hsi_array, gt_array, hsi_img, gt_img):
     
     return wavelengths if 'wavelengths' in locals() else None, gt_array_int
 
+def visualize_experimental_design():
+    """
+    Trực quan hóa thiết kế thí nghiệm dựa trên mô tả từ paper Munipalle & Nidamanuri (2024)
+    """
+    print("\n" + "=" * 60)
+    print("🔬 THIẾT KẾ THÍ NGHIỆM VÀ PHƯƠNG PHÁP")
+    print("=" * 60)
+    
+    # Tạo figure với 2 subplot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+    
+    # === Subplot 1: Experimental Layout ===
+    ax1.set_xlim(0, 20)
+    ax1.set_ylim(0, 15)
+    ax1.set_aspect('equal')
+    ax1.set_title('🌾 Experimental Plot Layout\n(University of Agricultural Sciences, Bengaluru)', 
+                  fontsize=14, fontweight='bold', pad=20)
+    
+    # Vẽ main plot (12m x 18m)
+    main_plot = patches.Rectangle((2, 2), 18, 12, linewidth=3, edgecolor='black', 
+                                  facecolor='lightgray', alpha=0.3)
+    ax1.add_patch(main_plot)
+    ax1.text(11, 0.5, '18m', ha='center', fontsize=12, fontweight='bold')
+    ax1.text(0.5, 8, '12m', ha='center', va='center', rotation=90, fontsize=12, fontweight='bold')
+    
+    # Vẽ 3 subplots (6m x 12m each)
+    colors = ['#FFB6C1', '#98FB98', '#87CEEB']  # Light colors for Low, Medium, High N
+    n_levels = ['Low N2\n(25 kg N/ha)', 'Medium N2\n(50 kg N/ha)', 'High N2\n(75 kg N/ha)']
+    
+    for i, (color, n_level) in enumerate(zip(colors, n_levels)):
+        subplot = patches.Rectangle((2 + i*6, 2), 6, 12, linewidth=2, 
+                                   edgecolor='darkblue', facecolor=color, alpha=0.7)
+        ax1.add_patch(subplot)
+        ax1.text(5 + i*6, 8, n_level, ha='center', va='center', fontsize=10, 
+                fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+        ax1.text(5 + i*6, 1, '6m × 12m', ha='center', fontsize=9, style='italic')
+    
+    # Thêm thông tin thêm
+    ax1.text(11, 15.5, 'Drip Irrigation System', ha='center', fontsize=11, 
+             bbox=dict(boxstyle="round,pad=0.5", facecolor='lightblue', alpha=0.8))
+    ax1.text(11, 14.7, '4 Replications per Treatment', ha='center', fontsize=10, style='italic')
+    
+    # Additional fertilizer info
+    fertilizer_text = """Fertilizer Application:
+• P: 41.5 kg/ha (blanket)
+• K: 16.6 kg/ha (blanket)
+• N: Variable by treatment"""
+    ax1.text(21, 8, fertilizer_text, ha='left', va='center', fontsize=9,
+             bbox=dict(boxstyle="round,pad=0.5", facecolor='lightyellow', alpha=0.8))
+    
+    ax1.set_xlabel('Distance (meters)', fontsize=12)
+    ax1.set_ylabel('Distance (meters)', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    
+    # === Subplot 2: Nitrogen Treatment Levels ===
+    ax2.set_title('💧 Nitrogen Treatment Levels\n(Eggplant Crop Specifications)', 
+                  fontsize=14, fontweight='bold', pad=20)
+    
+    # Data for bar chart
+    treatments = ['Low N2', 'Medium N2', 'High N2']
+    n_rates = [25, 50, 75]  # kg N/ha for eggplant
+    colors_bar = ['#FF6B6B', '#4ECDC4', '#45B7D1']
+    
+    bars = ax2.bar(treatments, n_rates, color=colors_bar, alpha=0.8, edgecolor='black', linewidth=2)
+    
+    # Add value labels on bars
+    for bar, rate in zip(bars, n_rates):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{rate} kg/ha', ha='center', va='bottom', fontweight='bold', fontsize=11)
+    
+    ax2.set_ylabel('Nitrogen Application Rate (kg N/ha)', fontsize=12)
+    ax2.set_xlabel('Treatment Levels', fontsize=12)
+    ax2.set_ylim(0, 85)
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    # Add reference line for medium level
+    ax2.axhline(y=50, color='gray', linestyle='--', alpha=0.7, linewidth=2)
+    ax2.text(1, 52, 'Regional Standard\n(50 kg N/ha)', ha='center', fontsize=9, 
+             bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+    
+    # Add experimental period info
+    experiment_info = """Experimental Period:
+February - June 2022
+
+Crop: Eggplant (Solanum melongena)
+Location: Bengaluru, India
+Field Size: 12m × 18m plots
+Irrigation: Drip system"""
+    
+    ax2.text(0.02, 0.98, experiment_info, transform=ax2.transAxes, fontsize=9,
+             verticalalignment='top', bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgreen', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    print("✅ Experimental design visualization completed!")
+    print("\n📋 KEY EXPERIMENTAL DETAILS:")
+    print("   🌱 Crop: Eggplant (Solanum melongena)")
+    print("   📍 Location: University of Agricultural Sciences, Bengaluru, India")
+    print("   📅 Period: February - June 2022")
+    print("   📏 Plot Size: 12m × 18m (subdivided into 3 subplots of 6m × 12m)")
+    print("   🔄 Replications: 4 per treatment")
+    print("   💧 Irrigation: Drip irrigation system")
+    print("   🧪 N Treatments: Low (25 kg/ha), Medium (50 kg/ha), High (75 kg/ha)")
+    print("   ⚗️  Other Nutrients: P (41.5 kg/ha), K (16.6 kg/ha) - blanket application")
+    
 def visualize_data(hsi_array, gt_array, wavelengths=None):
     """
     Trực quan hóa dữ liệu để hiểu rõ hơn
@@ -272,6 +380,10 @@ def main():
     """
     Hàm chính thực hiện toàn bộ quy trình khám phá dữ liệu
     """
+    # Bước 2.0: Visualize experimental design first
+    print("🔬 Hiểu về thiết kế thí nghiệm...")
+    visualize_experimental_design()
+    
     # Bước 2.1: Tải dữ liệu
     hsi_array, gt_array, hsi_img, gt_img = load_hyperspectral_data()
     
@@ -288,6 +400,7 @@ def main():
     
     print("\n" + "=" * 60)
     print("🎉 HOÀN THÀNH BƯỚC 2: KHÁM PHÁ DỮ LIỆU")
+    print("✅ Thiết kế thí nghiệm đã được mô tả")
     print("✅ Dữ liệu đã được tải và phân tích thành công!")
     print("📊 Các biểu đồ trực quan hóa đã được tạo.")
     print("➡️  Sẵn sàng cho Bước 3: Tiền xử lý dữ liệu")
